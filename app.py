@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import psycopg2
 
 st.title("Credit Risk Early-Warning System")
 st.write("Enter applicant details to check credit risk")
@@ -19,6 +20,29 @@ def predict_new_applicant(applicant_dict):
     probability = model.predict_proba(new_encoded)[0]
     risk_label = 'good' if prediction == 1 else 'bad'
     return risk_label, round(probability[1] * 100, 2)
+
+def save_submission(applicant_dict, risk_label, probability):
+    conn = psycopg2.connect(st.secrets["connections"]["postgres"]["url"])
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO applicant_submissions 
+        (checking_status, duration, credit_history, purpose, credit_amount, savings_status,
+         employment, installment_rate, personal_status, other_debtors, residence_since, property,
+         age, other_installment_plans, housing, existing_credits, job, dependents, telephone,
+         foreign_worker, predicted_risk, bad_risk_probability)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (
+        applicant_dict['checking_status'], applicant_dict['duration'], applicant_dict['credit_history'],
+        applicant_dict['purpose'], applicant_dict['credit_amount'], applicant_dict['savings_status'],
+        applicant_dict['employment'], applicant_dict['installment_rate'], applicant_dict['personal_status'],
+        applicant_dict['other_debtors'], applicant_dict['residence_since'], applicant_dict['property'],
+        applicant_dict['age'], applicant_dict['other_installment_plans'], applicant_dict['housing'],
+        applicant_dict['existing_credits'], applicant_dict['job'], applicant_dict['dependents'],
+        applicant_dict['telephone'], applicant_dict['foreign_worker'], risk_label, probability
+    ))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 # --- Form ---
 checking_status = st.selectbox("Checking Account Status", ['<0 DM', '0-200 DM', '>=200 DM', 'no account'])
@@ -53,6 +77,7 @@ if st.button("Check Credit Risk"):
         'telephone': telephone, 'foreign_worker': foreign_worker
     }
     label, prob = predict_new_applicant(applicant)
+    save_submission(applicant, label, prob)
     if label == 'bad':
         st.error(f"⚠️ High Risk — {prob}% probability of default")
     else:
