@@ -24,6 +24,7 @@ def predict_new_applicant(applicant_dict):
 def save_submission(applicant_dict, risk_label, probability):
     conn = psycopg2.connect(st.secrets["connections"]["postgres"]["url"])
     cur = conn.cursor()
+    cur.execute("SET search_path TO public;")
     cur.execute("""
         INSERT INTO public.applicant_submissions 
         (checking_status, duration, credit_history, purpose, credit_amount, savings_status,
