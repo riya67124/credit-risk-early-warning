@@ -25,7 +25,7 @@ def save_submission(applicant_dict, risk_label, probability):
     conn = psycopg2.connect(st.secrets["connections"]["postgres"]["url"])
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO applicant_submissions 
+        INSERT INTO public.applicant_submissions 
         (checking_status, duration, credit_history, purpose, credit_amount, savings_status,
          employment, installment_rate, personal_status, other_debtors, residence_since, property,
          age, other_installment_plans, housing, existing_credits, job, dependents, telephone,
