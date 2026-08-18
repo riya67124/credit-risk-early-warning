@@ -22,7 +22,7 @@ def predict_new_applicant(applicant_dict):
     return risk_label, round(probability[1] * 100, 2)
 
 def save_submission(applicant_dict, risk_label, probability):
-    conn = psycopg2.connect(st.secrets["connections"]["postgres"]["url"])
+    conn = psycopg2.connect(st.secrets["connections"]["postgres"]["url"], options="-c search_path=public")
     cur = conn.cursor()
     cur.execute("SET search_path TO public;")
     cur.execute("""
