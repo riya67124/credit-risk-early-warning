@@ -39,7 +39,7 @@ def save_submission(applicant_dict, risk_label, probability):
         applicant_dict['other_debtors'], applicant_dict['residence_since'], applicant_dict['property'],
         applicant_dict['age'], applicant_dict['other_installment_plans'], applicant_dict['housing'],
         applicant_dict['existing_credits'], applicant_dict['job'], applicant_dict['dependents'],
-        applicant_dict['telephone'], applicant_dict['foreign_worker'], risk_label, probability
+        applicant_dict['telephone'], applicant_dict['foreign_worker'], risk_label, float(probability)
     ))
     conn.commit()
     cur.close()
