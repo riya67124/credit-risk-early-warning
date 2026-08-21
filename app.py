@@ -7,9 +7,7 @@ import seaborn as sns
 
 st.set_page_config(page_title="Credit Risk System", layout="wide")
 
-# --- Custom styling: bigger, centered tabs + overall polish ---
 st.markdown("""
-    st.markdown("""
     <style>
     .stTabs [data-baseweb="tab-list"] {
         display: flex;
