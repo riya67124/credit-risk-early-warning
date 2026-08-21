@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import joblib
 import psycopg2
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 st.set_page_config(page_title="Credit Risk System", layout="wide")
-
-page = st.sidebar.radio("Navigate", ["Predict", "Dashboard"])
 
 model = joblib.load('credit_risk_model.pkl')
 model_columns = joblib.load('model_columns.pkl')
@@ -53,21 +53,21 @@ def get_dashboard_data():
     total = pd.read_sql("SELECT COUNT(*) as total FROM public.applicant_submissions;", conn)
     by_risk = pd.read_sql("SELECT predicted_risk, COUNT(*) as count FROM public.applicant_submissions GROUP BY predicted_risk;", conn)
     by_purpose = pd.read_sql("""
-        SELECT purpose, 
-               COUNT(*) as total,
+        SELECT purpose, COUNT(*) as total,
                ROUND(100.0 * SUM(CASE WHEN predicted_risk='bad' THEN 1 ELSE 0 END) / COUNT(*), 1) as bad_pct
-        FROM public.applicant_submissions
-        GROUP BY purpose ORDER BY bad_pct DESC;
+        FROM public.applicant_submissions GROUP BY purpose ORDER BY bad_pct DESC;
     """, conn)
     recent = pd.read_sql("""
         SELECT submitted_at, purpose, credit_amount, predicted_risk, bad_risk_probability 
-        FROM public.applicant_submissions 
-        ORDER BY submitted_at DESC LIMIT 10;
+        FROM public.applicant_submissions ORDER BY submitted_at DESC LIMIT 10;
     """, conn)
     conn.close()
     return total, by_risk, by_purpose, recent
 
-if page == "Predict":
+# --- Top navbar-style tabs ---
+tab1, tab2 = st.tabs(["🔍 Predict", "📊 Dashboard"])
+
+with tab1:
     st.title("Credit Risk Early-Warning System")
     st.write("Enter applicant details to check credit risk")
 
@@ -109,7 +109,7 @@ if page == "Predict":
         else:
             st.success(f"✅ Low Risk — {prob}% probability of default")
 
-elif page == "Dashboard":
+with tab2:
     st.title("Live Usage Dashboard")
     st.write("Real-time stats from every prediction run through this app")
 
@@ -124,8 +124,24 @@ elif page == "Dashboard":
         col2.metric("Flagged High Risk", int(bad_count))
         col3.metric("Final Model", "Logistic Regression")
 
-        st.subheader("Risk Breakdown by Loan Purpose (live)")
-        st.dataframe(by_purpose, use_container_width=True)
+        chart_col1, chart_col2 = st.columns(2)
+
+        with chart_col1:
+            st.subheader("Good vs Bad Risk Split")
+            fig1, ax1 = plt.subplots(figsize=(5,4))
+            colors = {'good': '#66BB6A', 'bad': '#EF5350'}
+            ax1.pie(by_risk['count'], labels=by_risk['predicted_risk'], autopct='%1.1f%%',
+                    colors=[colors.get(r, '#999') for r in by_risk['predicted_risk']])
+            st.pyplot(fig1)
+
+        with chart_col2:
+            st.subheader("Bad Risk % by Loan Purpose")
+            if len(by_purpose) > 0:
+                fig2, ax2 = plt.subplots(figsize=(5,4))
+                sns.barplot(x='bad_pct', y='purpose', data=by_purpose, ax=ax2,
+                            hue='purpose', palette='Reds_r', legend=False)
+                ax2.set_xlabel("Bad Risk %")
+                st.pyplot(fig2)
 
         st.subheader("Most Recent Submissions")
         st.dataframe(recent, use_container_width=True)
