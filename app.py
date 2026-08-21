@@ -9,21 +9,30 @@ st.set_page_config(page_title="Credit Risk System", layout="wide")
 
 # --- Custom styling: bigger, centered tabs + overall polish ---
 st.markdown("""
+    st.markdown("""
     <style>
     .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
+        display: flex;
         justify-content: center;
+        gap: 40px;
+        width: 100%;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 55px;
-        padding: 0px 32px;
-        font-size: 18px;
+        height: 50px;
+        padding: 0px 28px;
+        font-size: 17px;
         font-weight: 600;
-        border-radius: 8px 8px 0px 0px;
+        background-color: transparent;
+        border-bottom: 3px solid transparent;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #2C6E91;
-        color: white;
+        background-color: transparent;
+        color: #2C6E91;
+        border-bottom: 3px solid #2C6E91;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        color: #2C6E91;
+        background-color: transparent;
     }
     div.block-container {
         padding-top: 2rem;
