@@ -59,7 +59,7 @@ def predict_new_applicant(applicant_dict):
     prediction = model.predict(new_encoded)[0]
     probability = model.predict_proba(new_encoded)[0]
     risk_label = 'good' if prediction == 1 else 'bad'
-    return risk_label, round(float(probability[1]) * 100, 2)
+    return risk_label, round(float(probability[1]) * 100, 2), new_encoded
 
 def save_submission(applicant_dict, risk_label, probability):
     conn = get_connection()
@@ -106,8 +106,13 @@ def get_dashboard_data():
     conn.close()
     return total, by_risk, by_purpose, by_employment, amounts, recent
 
-# --- Top navbar-style tabs (styled bigger + centered via CSS above) ---
-tab1, tab2 = st.tabs(["🔍  Predict", "📊  Dashboard"])
+# --- Check if this is YOUR secret admin link ---
+is_admin = st.query_params.get("admin") == st.secrets.get("admin_key", "")
+
+if is_admin:
+    tab1, tab2, tab3 = st.tabs(["🔍  Predict", "📈  Why This Result?", "🔐  Dashboard"])
+else:
+    tab1, tab2 = st.tabs(["🔍  Predict", "📈  Why This Result?"])
 
 with tab1:
     st.title("Credit Risk Early-Warning System")
@@ -144,75 +149,119 @@ with tab1:
             'existing_credits': existing_credits, 'job': job, 'dependents': dependents,
             'telephone': telephone, 'foreign_worker': foreign_worker
         }
-        label, prob = predict_new_applicant(applicant)
+        label, prob, encoded_row = predict_new_applicant(applicant)
         save_submission(applicant, label, prob)
+
+        # Save this result so the "Why This Result?" tab can use it
+        st.session_state['last_result'] = {
+            'label': label, 'prob': prob, 'encoded_row': encoded_row
+        }
+
         if label == 'bad':
             st.error(f"⚠️ High Risk — {prob}% probability of default")
         else:
             st.success(f"✅ Low Risk — {prob}% probability of default")
+        st.info("👉 Check the 'Why This Result?' tab above to see what drove this prediction.")
 
 with tab2:
-    st.title("Live Usage Dashboard")
-    st.write("Real-time stats from every prediction run through this app")
-
-    total, by_risk, by_purpose, by_employment, amounts, recent = get_dashboard_data()
-
-    if total['total'][0] == 0:
-        st.info("No submissions yet — try the Predict tab first!")
+    st.title("Why This Result?")
+    if 'last_result' not in st.session_state:
+        st.info("Fill out the Predict tab first to see your personalized explanation here.")
     else:
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Submissions", int(total['total'][0]))
-        bad_count = by_risk[by_risk['predicted_risk']=='bad']['count'].sum() if 'bad' in by_risk['predicted_risk'].values else 0
-        col2.metric("Flagged High Risk", int(bad_count))
-        col3.metric("Final Model", "Logistic Regression")
+        result = st.session_state['last_result']
+        label = result['label']
+        prob = result['prob']
+        encoded_row = result['encoded_row']
 
-        st.markdown("####")  # small spacer
+        st.write(f"Your result: **{'⚠️ High Risk' if label=='bad' else '✅ Low Risk'}** ({prob}% risk probability)")
 
-        # --- 4 charts, one row ---
-        c1, c2, c3, c4 = st.columns(4)
+        # Multiply each active feature by its coefficient to see what pushed the prediction
+        coefs = pd.DataFrame({
+            'feature': model_columns,
+            'coefficient': model.coef_[0],
+            'active': encoded_row.iloc[0].values
+        })
+        # Only features that were actually "on" (1) for this applicant matter
+        active_factors = coefs[coefs['active'] == 1].copy()
+        active_factors['impact'] = active_factors['coefficient']
+        active_factors = active_factors.sort_values('impact', ascending=False)
 
-        with c1:
-            st.caption("Good vs Bad Split")
-            fig1, ax1 = plt.subplots(figsize=(3.5, 3))
-            colors = {'good': GOOD_COLOR, 'bad': BAD_COLOR}
-            ax1.pie(by_risk['count'], labels=by_risk['predicted_risk'], autopct='%1.0f%%',
-                    colors=[colors.get(r, '#999') for r in by_risk['predicted_risk']],
-                    textprops={'fontsize': 8})
-            st.pyplot(fig1, use_container_width=True)
+        top_risky = active_factors.head(5)
+        top_safe = active_factors.tail(5)
 
-        with c2:
-            st.caption("Risk % by Purpose")
-            if len(by_purpose) > 0:
-                fig2, ax2 = plt.subplots(figsize=(3.5, 3))
-                sns.barplot(x='bad_pct', y='purpose', data=by_purpose.head(6), ax=ax2,
-                            hue='purpose', palette=PALETTE, legend=False)
-                ax2.set_xlabel("Bad %", fontsize=8)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("⚠️ Factors pushing toward risk")
+            if len(top_risky[top_risky['impact'] > 0]) > 0:
+                fig1, ax1 = plt.subplots(figsize=(5, 4))
+                risky_only = top_risky[top_risky['impact'] > 0]
+                sns.barplot(x='impact', y='feature', data=risky_only, ax=ax1,
+                            hue='feature', palette=['#D65F5F']*len(risky_only), legend=False)
+                ax1.set_xlabel("Impact")
+                ax1.set_ylabel("")
+                st.pyplot(fig1, use_container_width=True)
+            else:
+                st.write("No strong risk-increasing factors found.")
+
+        with col2:
+            st.subheader("✅ Factors pushing toward safety")
+            if len(top_safe[top_safe['impact'] < 0]) > 0:
+                fig2, ax2 = plt.subplots(figsize=(5, 4))
+                safe_only = top_safe[top_safe['impact'] < 0]
+                sns.barplot(x='impact', y='feature', data=safe_only, ax=ax2,
+                            hue='feature', palette=['#4C9F70']*len(safe_only), legend=False)
+                ax2.set_xlabel("Impact")
                 ax2.set_ylabel("")
-                ax2.tick_params(labelsize=7)
                 st.pyplot(fig2, use_container_width=True)
+            else:
+                st.write("No strong safety factors found.")
 
-        with c3:
-            st.caption("Risk % by Employment")
-            if len(by_employment) > 0:
-                fig3, ax3 = plt.subplots(figsize=(3.5, 3))
-                sns.barplot(x='bad_pct', y='employment', data=by_employment, ax=ax3,
-                            hue='employment', palette=PALETTE, legend=False)
-                ax3.set_xlabel("Bad %", fontsize=8)
-                ax3.set_ylabel("")
-                ax3.tick_params(labelsize=7)
-                st.pyplot(fig3, use_container_width=True)
+if is_admin:
+    with tab3:
+        st.title("Live Usage Dashboard")
+        st.write("Real-time stats from every prediction run through this app")
 
-        with c4:
-            st.caption("Credit Amount by Risk")
-            if len(amounts) > 0:
-                fig4, ax4 = plt.subplots(figsize=(3.5, 3))
-                sns.boxplot(x='predicted_risk', y='credit_amount', data=amounts, ax=ax4,
-                            hue='predicted_risk', palette={'good': GOOD_COLOR, 'bad': BAD_COLOR}, legend=False)
-                ax4.set_xlabel("")
-                ax4.set_ylabel("Amount", fontsize=8)
-                ax4.tick_params(labelsize=7)
-                st.pyplot(fig4, use_container_width=True)
+        total, by_risk, by_purpose, by_employment, amounts, recent = get_dashboard_data()
 
-        st.markdown("####")
-        st.subheader("Most Recent Submissions")
-        st.dataframe(recent, use_container_width=True)
+        if total['total'][0] == 0:
+            st.info("No submissions yet.")
+        else:
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Submissions", int(total['total'][0]))
+            bad_count = by_risk[by_risk['predicted_risk']=='bad']['count'].sum() if 'bad' in by_risk['predicted_risk'].values else 0
+            col2.metric("Flagged High Risk", int(bad_count))
+            col3.metric("Final Model", "Logistic Regression")
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.caption("Good vs Bad Split")
+                fig1, ax1 = plt.subplots(figsize=(3.5, 3))
+                colors = {'good': GOOD_COLOR, 'bad': BAD_COLOR}
+                ax1.pie(by_risk['count'], labels=by_risk['predicted_risk'], autopct='%1.0f%%',
+                        colors=[colors.get(r, '#999') for r in by_risk['predicted_risk']], textprops={'fontsize': 8})
+                st.pyplot(fig1, use_container_width=True)
+            with c2:
+                st.caption("Risk % by Purpose")
+                if len(by_purpose) > 0:
+                    fig2, ax2 = plt.subplots(figsize=(3.5, 3))
+                    sns.barplot(x='bad_pct', y='purpose', data=by_purpose.head(6), ax=ax2, hue='purpose', palette=PALETTE, legend=False)
+                    ax2.set_xlabel("Bad %", fontsize=8); ax2.set_ylabel(""); ax2.tick_params(labelsize=7)
+                    st.pyplot(fig2, use_container_width=True)
+            with c3:
+                st.caption("Risk % by Employment")
+                if len(by_employment) > 0:
+                    fig3, ax3 = plt.subplots(figsize=(3.5, 3))
+                    sns.barplot(x='bad_pct', y='employment', data=by_employment, ax=ax3, hue='employment', palette=PALETTE, legend=False)
+                    ax3.set_xlabel("Bad %", fontsize=8); ax3.set_ylabel(""); ax3.tick_params(labelsize=7)
+                    st.pyplot(fig3, use_container_width=True)
+            with c4:
+                st.caption("Credit Amount by Risk")
+                if len(amounts) > 0:
+                    fig4, ax4 = plt.subplots(figsize=(3.5, 3))
+                    sns.boxplot(x='predicted_risk', y='credit_amount', data=amounts, ax=ax4,
+                                hue='predicted_risk', palette={'good': GOOD_COLOR, 'bad': BAD_COLOR}, legend=False)
+                    ax4.set_xlabel(""); ax4.set_ylabel("Amount", fontsize=8); ax4.tick_params(labelsize=7)
+                    st.pyplot(fig4, use_container_width=True)
+
+            st.subheader("Most Recent Submissions")
+            st.dataframe(recent, use_container_width=True)
