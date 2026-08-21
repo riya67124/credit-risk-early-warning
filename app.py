@@ -113,6 +113,7 @@ def get_dashboard_data():
  
 # --- Check if this is YOUR secret admin link ---
 is_admin = st.query_params.get("admin") == st.secrets.get("admin_key", "")
+st.write(f"DEBUG - query param: {st.query_params.get('admin')} | secret: {st.secrets.get('admin_key', 'NOT FOUND')}")
  
 if is_admin:
     tab1, tab2, tab3 = st.tabs(["🔍  Predict", "📈  Why This Result?", "🔐  Dashboard"])
