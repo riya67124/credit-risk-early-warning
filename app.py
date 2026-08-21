@@ -3,11 +3,15 @@ import pandas as pd
 import joblib
 import psycopg2
 
-st.title("Credit Risk Early-Warning System")
-st.write("Enter applicant details to check credit risk")
+st.set_page_config(page_title="Credit Risk System", layout="wide")
+
+page = st.sidebar.radio("Navigate", ["Predict", "Dashboard"])
 
 model = joblib.load('credit_risk_model.pkl')
 model_columns = joblib.load('model_columns.pkl')
+
+def get_connection():
+    return psycopg2.connect(st.secrets["connections"]["postgres"]["url"], options="-c search_path=public")
 
 def predict_new_applicant(applicant_dict):
     new_df = pd.DataFrame([applicant_dict])
@@ -19,12 +23,11 @@ def predict_new_applicant(applicant_dict):
     prediction = model.predict(new_encoded)[0]
     probability = model.predict_proba(new_encoded)[0]
     risk_label = 'good' if prediction == 1 else 'bad'
-    return risk_label, round(probability[1] * 100, 2)
+    return risk_label, round(float(probability[1]) * 100, 2)
 
 def save_submission(applicant_dict, risk_label, probability):
-    conn = psycopg2.connect(st.secrets["connections"]["postgres"]["url"], options="-c search_path=public")
+    conn = get_connection()
     cur = conn.cursor()
-    cur.execute("SET search_path TO public;")
     cur.execute("""
         INSERT INTO public.applicant_submissions 
         (checking_status, duration, credit_history, purpose, credit_amount, savings_status,
@@ -45,41 +48,84 @@ def save_submission(applicant_dict, risk_label, probability):
     cur.close()
     conn.close()
 
-# --- Form ---
-checking_status = st.selectbox("Checking Account Status", ['<0 DM', '0-200 DM', '>=200 DM', 'no account'])
-duration = st.slider("Loan Duration (months)", 4, 72, 24)
-credit_history = st.selectbox("Credit History", ['no credits/all paid', 'all paid this bank', 'existing paid duly', 'delay in past', 'critical account'])
-purpose = st.selectbox("Loan Purpose", ['new car', 'used car', 'furniture', 'radio/TV', 'appliances', 'repairs', 'education', 'retraining', 'business', 'other'])
-credit_amount = st.number_input("Credit Amount (DM)", 250, 20000, 3000)
-savings_status = st.selectbox("Savings Account", ['<100 DM', '100-500 DM', '500-1000 DM', '>=1000 DM', 'unknown/none'])
-employment = st.selectbox("Employment Duration", ['unemployed', '<1 year', '1-4 years', '4-7 years', '>=7 years'])
-installment_rate = st.slider("Installment Rate (% of income)", 1, 4, 2)
-personal_status = st.selectbox("Personal Status", ['male-divorced', 'female-div/married', 'male-single', 'male-married', 'female-single'])
-other_debtors = st.selectbox("Other Debtors/Guarantors", ['none', 'co-applicant', 'guarantor'])
-residence_since = st.slider("Years at Current Residence", 1, 4, 2)
-property_ = st.selectbox("Property", ['real estate', 'savings/insurance', 'car/other', 'unknown/none'])
-age = st.slider("Age", 18, 75, 30)
-other_installment_plans = st.selectbox("Other Installment Plans", ['bank', 'stores', 'none'])
-housing = st.selectbox("Housing", ['rent', 'own', 'free'])
-existing_credits = st.slider("Existing Credits at This Bank", 1, 4, 1)
-job = st.selectbox("Job", ['unemployed/unskilled', 'unskilled-resident', 'skilled', 'management/highly qualified'])
-dependents = st.slider("Number of Dependents", 1, 2, 1)
-telephone = st.selectbox("Telephone", ['none', 'yes'])
-foreign_worker = st.selectbox("Foreign Worker", ['yes', 'no'])
+def get_dashboard_data():
+    conn = get_connection()
+    total = pd.read_sql("SELECT COUNT(*) as total FROM public.applicant_submissions;", conn)
+    by_risk = pd.read_sql("SELECT predicted_risk, COUNT(*) as count FROM public.applicant_submissions GROUP BY predicted_risk;", conn)
+    by_purpose = pd.read_sql("""
+        SELECT purpose, 
+               COUNT(*) as total,
+               ROUND(100.0 * SUM(CASE WHEN predicted_risk='bad' THEN 1 ELSE 0 END) / COUNT(*), 1) as bad_pct
+        FROM public.applicant_submissions
+        GROUP BY purpose ORDER BY bad_pct DESC;
+    """, conn)
+    recent = pd.read_sql("""
+        SELECT submitted_at, purpose, credit_amount, predicted_risk, bad_risk_probability 
+        FROM public.applicant_submissions 
+        ORDER BY submitted_at DESC LIMIT 10;
+    """, conn)
+    conn.close()
+    return total, by_risk, by_purpose, recent
 
-if st.button("Check Credit Risk"):
-    applicant = {
-        'checking_status': checking_status, 'duration': duration, 'credit_history': credit_history,
-        'purpose': purpose, 'credit_amount': credit_amount, 'savings_status': savings_status,
-        'employment': employment, 'installment_rate': installment_rate, 'personal_status': personal_status,
-        'other_debtors': other_debtors, 'residence_since': residence_since, 'property': property_,
-        'age': age, 'other_installment_plans': other_installment_plans, 'housing': housing,
-        'existing_credits': existing_credits, 'job': job, 'dependents': dependents,
-        'telephone': telephone, 'foreign_worker': foreign_worker
-    }
-    label, prob = predict_new_applicant(applicant)
-    save_submission(applicant, label, prob)
-    if label == 'bad':
-        st.error(f"⚠️ High Risk — {prob}% probability of default")
+if page == "Predict":
+    st.title("Credit Risk Early-Warning System")
+    st.write("Enter applicant details to check credit risk")
+
+    checking_status = st.selectbox("Checking Account Status", ['<0 DM', '0-200 DM', '>=200 DM', 'no account'])
+    duration = st.slider("Loan Duration (months)", 4, 72, 24)
+    credit_history = st.selectbox("Credit History", ['no credits/all paid', 'all paid this bank', 'existing paid duly', 'delay in past', 'critical account'])
+    purpose = st.selectbox("Loan Purpose", ['new car', 'used car', 'furniture', 'radio/TV', 'appliances', 'repairs', 'education', 'retraining', 'business', 'other'])
+    credit_amount = st.number_input("Credit Amount (DM)", 250, 20000, 3000)
+    savings_status = st.selectbox("Savings Account", ['<100 DM', '100-500 DM', '500-1000 DM', '>=1000 DM', 'unknown/none'])
+    employment = st.selectbox("Employment Duration", ['unemployed', '<1 year', '1-4 years', '4-7 years', '>=7 years'])
+    installment_rate = st.slider("Installment Rate (% of income)", 1, 4, 2)
+    personal_status = st.selectbox("Personal Status", ['male-divorced', 'female-div/married', 'male-single', 'male-married', 'female-single'])
+    other_debtors = st.selectbox("Other Debtors/Guarantors", ['none', 'co-applicant', 'guarantor'])
+    residence_since = st.slider("Years at Current Residence", 1, 4, 2)
+    property_ = st.selectbox("Property", ['real estate', 'savings/insurance', 'car/other', 'unknown/none'])
+    age = st.slider("Age", 18, 75, 30)
+    other_installment_plans = st.selectbox("Other Installment Plans", ['bank', 'stores', 'none'])
+    housing = st.selectbox("Housing", ['rent', 'own', 'free'])
+    existing_credits = st.slider("Existing Credits at This Bank", 1, 4, 1)
+    job = st.selectbox("Job", ['unemployed/unskilled', 'unskilled-resident', 'skilled', 'management/highly qualified'])
+    dependents = st.slider("Number of Dependents", 1, 2, 1)
+    telephone = st.selectbox("Telephone", ['none', 'yes'])
+    foreign_worker = st.selectbox("Foreign Worker", ['yes', 'no'])
+
+    if st.button("Check Credit Risk"):
+        applicant = {
+            'checking_status': checking_status, 'duration': duration, 'credit_history': credit_history,
+            'purpose': purpose, 'credit_amount': credit_amount, 'savings_status': savings_status,
+            'employment': employment, 'installment_rate': installment_rate, 'personal_status': personal_status,
+            'other_debtors': other_debtors, 'residence_since': residence_since, 'property': property_,
+            'age': age, 'other_installment_plans': other_installment_plans, 'housing': housing,
+            'existing_credits': existing_credits, 'job': job, 'dependents': dependents,
+            'telephone': telephone, 'foreign_worker': foreign_worker
+        }
+        label, prob = predict_new_applicant(applicant)
+        save_submission(applicant, label, prob)
+        if label == 'bad':
+            st.error(f"⚠️ High Risk — {prob}% probability of default")
+        else:
+            st.success(f"✅ Low Risk — {prob}% probability of default")
+
+elif page == "Dashboard":
+    st.title("Live Usage Dashboard")
+    st.write("Real-time stats from every prediction run through this app")
+
+    total, by_risk, by_purpose, recent = get_dashboard_data()
+
+    if total['total'][0] == 0:
+        st.info("No submissions yet — try the Predict tab first!")
     else:
-        st.success(f"✅ Low Risk — {prob}% probability of default")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Submissions", int(total['total'][0]))
+        bad_count = by_risk[by_risk['predicted_risk']=='bad']['count'].sum() if 'bad' in by_risk['predicted_risk'].values else 0
+        col2.metric("Flagged High Risk", int(bad_count))
+        col3.metric("Final Model", "Logistic Regression")
+
+        st.subheader("Risk Breakdown by Loan Purpose (live)")
+        st.dataframe(by_purpose, use_container_width=True)
+
+        st.subheader("Most Recent Submissions")
+        st.dataframe(recent, use_container_width=True)
