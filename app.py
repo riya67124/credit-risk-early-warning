@@ -7,6 +7,35 @@ import seaborn as sns
 
 st.set_page_config(page_title="Credit Risk System", layout="wide")
 
+# --- Custom styling: bigger, centered tabs + overall polish ---
+st.markdown("""
+    <style>
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+        justify-content: center;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 55px;
+        padding: 0px 32px;
+        font-size: 18px;
+        font-weight: 600;
+        border-radius: 8px 8px 0px 0px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #2C6E91;
+        color: white;
+    }
+    div.block-container {
+        padding-top: 2rem;
+        max-width: 1100px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+PALETTE = "Blues_r"
+GOOD_COLOR = "#4C9F70"
+BAD_COLOR = "#D65F5F"
+
 model = joblib.load('credit_risk_model.pkl')
 model_columns = joblib.load('model_columns.pkl')
 
@@ -57,15 +86,21 @@ def get_dashboard_data():
                ROUND(100.0 * SUM(CASE WHEN predicted_risk='bad' THEN 1 ELSE 0 END) / COUNT(*), 1) as bad_pct
         FROM public.applicant_submissions GROUP BY purpose ORDER BY bad_pct DESC;
     """, conn)
+    by_employment = pd.read_sql("""
+        SELECT employment, COUNT(*) as total,
+               ROUND(100.0 * SUM(CASE WHEN predicted_risk='bad' THEN 1 ELSE 0 END) / COUNT(*), 1) as bad_pct
+        FROM public.applicant_submissions GROUP BY employment ORDER BY bad_pct DESC;
+    """, conn)
+    amounts = pd.read_sql("SELECT predicted_risk, credit_amount FROM public.applicant_submissions;", conn)
     recent = pd.read_sql("""
         SELECT submitted_at, purpose, credit_amount, predicted_risk, bad_risk_probability 
         FROM public.applicant_submissions ORDER BY submitted_at DESC LIMIT 10;
     """, conn)
     conn.close()
-    return total, by_risk, by_purpose, recent
+    return total, by_risk, by_purpose, by_employment, amounts, recent
 
-# --- Top navbar-style tabs ---
-tab1, tab2 = st.tabs(["🔍 Predict", "📊 Dashboard"])
+# --- Top navbar-style tabs (styled bigger + centered via CSS above) ---
+tab1, tab2 = st.tabs(["🔍  Predict", "📊  Dashboard"])
 
 with tab1:
     st.title("Credit Risk Early-Warning System")
@@ -113,7 +148,7 @@ with tab2:
     st.title("Live Usage Dashboard")
     st.write("Real-time stats from every prediction run through this app")
 
-    total, by_risk, by_purpose, recent = get_dashboard_data()
+    total, by_risk, by_purpose, by_employment, amounts, recent = get_dashboard_data()
 
     if total['total'][0] == 0:
         st.info("No submissions yet — try the Predict tab first!")
@@ -124,24 +159,53 @@ with tab2:
         col2.metric("Flagged High Risk", int(bad_count))
         col3.metric("Final Model", "Logistic Regression")
 
-        chart_col1, chart_col2 = st.columns(2)
+        st.markdown("####")  # small spacer
 
-        with chart_col1:
-            st.subheader("Good vs Bad Risk Split")
-            fig1, ax1 = plt.subplots(figsize=(5,4))
-            colors = {'good': '#66BB6A', 'bad': '#EF5350'}
-            ax1.pie(by_risk['count'], labels=by_risk['predicted_risk'], autopct='%1.1f%%',
-                    colors=[colors.get(r, '#999') for r in by_risk['predicted_risk']])
-            st.pyplot(fig1)
+        # --- 4 charts, one row ---
+        c1, c2, c3, c4 = st.columns(4)
 
-        with chart_col2:
-            st.subheader("Bad Risk % by Loan Purpose")
+        with c1:
+            st.caption("Good vs Bad Split")
+            fig1, ax1 = plt.subplots(figsize=(3.5, 3))
+            colors = {'good': GOOD_COLOR, 'bad': BAD_COLOR}
+            ax1.pie(by_risk['count'], labels=by_risk['predicted_risk'], autopct='%1.0f%%',
+                    colors=[colors.get(r, '#999') for r in by_risk['predicted_risk']],
+                    textprops={'fontsize': 8})
+            st.pyplot(fig1, use_container_width=True)
+
+        with c2:
+            st.caption("Risk % by Purpose")
             if len(by_purpose) > 0:
-                fig2, ax2 = plt.subplots(figsize=(5,4))
-                sns.barplot(x='bad_pct', y='purpose', data=by_purpose, ax=ax2,
-                            hue='purpose', palette='Reds_r', legend=False)
-                ax2.set_xlabel("Bad Risk %")
-                st.pyplot(fig2)
+                fig2, ax2 = plt.subplots(figsize=(3.5, 3))
+                sns.barplot(x='bad_pct', y='purpose', data=by_purpose.head(6), ax=ax2,
+                            hue='purpose', palette=PALETTE, legend=False)
+                ax2.set_xlabel("Bad %", fontsize=8)
+                ax2.set_ylabel("")
+                ax2.tick_params(labelsize=7)
+                st.pyplot(fig2, use_container_width=True)
 
+        with c3:
+            st.caption("Risk % by Employment")
+            if len(by_employment) > 0:
+                fig3, ax3 = plt.subplots(figsize=(3.5, 3))
+                sns.barplot(x='bad_pct', y='employment', data=by_employment, ax=ax3,
+                            hue='employment', palette=PALETTE, legend=False)
+                ax3.set_xlabel("Bad %", fontsize=8)
+                ax3.set_ylabel("")
+                ax3.tick_params(labelsize=7)
+                st.pyplot(fig3, use_container_width=True)
+
+        with c4:
+            st.caption("Credit Amount by Risk")
+            if len(amounts) > 0:
+                fig4, ax4 = plt.subplots(figsize=(3.5, 3))
+                sns.boxplot(x='predicted_risk', y='credit_amount', data=amounts, ax=ax4,
+                            hue='predicted_risk', palette={'good': GOOD_COLOR, 'bad': BAD_COLOR}, legend=False)
+                ax4.set_xlabel("")
+                ax4.set_ylabel("Amount", fontsize=8)
+                ax4.tick_params(labelsize=7)
+                st.pyplot(fig4, use_container_width=True)
+
+        st.markdown("####")
         st.subheader("Most Recent Submissions")
         st.dataframe(recent, use_container_width=True)
