@@ -60,6 +60,7 @@ Given the model's 80% recall on defaulters, deploying this as a first-pass scree
 ├── requirements.txt           # Python dependencies
 ├── credit_risk_model.pkl      # Trained Logistic Regression model
 ├── model_columns.pkl          # Feature column structure for encoding new data
+├── credit_risk_analysis.ipynb # Full analysis notebook — SQL setup, EDA, 5-model comparison
 └── README.md
 ```
 
